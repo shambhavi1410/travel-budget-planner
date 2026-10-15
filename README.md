@@ -1,5 +1,7 @@
 # AI Smart Travel and Budget Planner
 
+**Live demo:** https://travel-budget-planner-h0g1.onrender.com/ 
+
 Full-stack travel planner built with FastAPI and SQLite. It combines Gemini-generated itineraries with expense tracking, budget management and an ML spending forecast.
 
 ## Features
