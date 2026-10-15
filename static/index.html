@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Travel & Budget Planner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--ink:#16232e;--muted:#5b6b78;--bg:#eef3f5;--card:#fff;--lagoon:#0e7490;--sun:#f59e0b;--bad:#b91c1c;--line:#d5dfe4}
+@media(prefers-color-scheme:dark){:root{--ink:#e6eef2;--muted:#9fb0bb;--bg:#0f1a21;--card:#17252e;--line:#2a3b46}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+.app{display:grid;grid-template-columns:280px 1fr;min-height:100vh}
+aside{padding:20px;border-right:1px solid var(--line)}main{padding:24px;max-width:1000px}
+h1{font-size:18px;margin:0 0 16px}h2{font-size:16px;margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+input,select,button{font:inherit;padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);width:100%;margin-bottom:8px}
+button{background:var(--lagoon);color:#fff;border:0;cursor:pointer;width:auto;margin:0}
+button.ghost{background:none;color:var(--muted);padding:2px 6px}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--sun);outline-offset:2px}
+.trip{padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between}
+.trip.on{background:var(--lagoon);color:#fff}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.stat b{display:block;font-size:22px}.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:10px}
+.bar i{display:block;height:100%;background:var(--lagoon)}.warn{color:var(--bad);font-weight:600}
+.charts{display:grid;grid-template-columns:1fr 1.4fr;gap:16px}.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:110px}
+table{width:100%;border-collapse:collapse}td{padding:6px 4px;border-top:1px solid var(--line)}
+@media(max-width:800px){.app,.charts{grid-template-columns:1fr}aside{border:0}}
+</style></head><body><div class="app">
+<aside><h1>Trips</h1><div id="trips"></div>
+<div class="card" style="margin-top:16px"><h2>New trip</h2>
+<input id="tn" placeholder="Trip name"><input id="td" placeholder="Destination">
+<input id="tdays" type="number" min="1" placeholder="Days"><input id="tb" type="number" min="1" placeholder="Total budget">
+<button onclick="addTrip()">Create trip</button></div></aside>
+<main id="main"><p>Create or pick a trip to start planning.</p></main></div>
+<script>
+let cur=null,pie,line;const $=id=>document.getElementById(id);
+const api=async(p,o)=>{const r=await fetch('/api'+p,o);if(!r.ok){alert((await r.json()).detail||'Request failed');throw 0}return r.json()};
+const post=(p,b)=>api(p,{method:'POST',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
+const money=n=>Number(n).toLocaleString(undefined,{maximumFractionDigits:0});
+async function loadTrips(){const t=await api('/trips');$('trips').innerHTML=t.map(x=>`<div class="trip ${x.id===cur?'on':''}" onclick="pick(${x.id})"><span>${x.name}</span><button class="ghost" onclick="event.stopPropagation();delTrip(${x.id})" aria-label="Delete trip">✕</button></div>`).join('')||'<p>No trips yet.</p>'}
+async function addTrip(){const b={name:$('tn').value,destination:$('td').value,days:+$('tdays').value,budget:+$('tb').value};
+ const r=await post('/trips',b);cur=r.id;await loadTrips();render()}
+async function delTrip(id){if(!confirm('Delete this trip and its expenses?'))return;await api('/trips/'+id,{method:'DELETE'});if(cur===id)cur=null;await loadTrips();render()}
+function pick(id){cur=id;loadTrips();render()}
+async function render(){
+ if(!cur){$('main').innerHTML='<p>Create or pick a trip to start planning.</p>';return}
+ const [trips,s,f,ex,cats,plan]=await Promise.all([api('/trips'),api(`/trips/${cur}/summary`),api(`/trips/${cur}/forecast`),api(`/trips/${cur}/expenses`),api('/categories'),api(`/trips/${cur}/plan`)]);
+ const t=trips.find(x=>x.id===cur);
+ $('main').innerHTML=`<h1>${t.name} · ${t.destination} · ${t.days} days</h1>
+ <div class="card"><div class="stats"><div class="stat"><b>${money(s.budget)}</b>Budget</div><div class="stat"><b>${money(s.spent)}</b>Spent</div>
+ <div class="stat"><b class="${s.remaining<0?'warn':''}">${money(s.remaining)}</b>Remaining</div></div>
+ <div class="bar"><i style="width:${Math.min(s.percent_used,100)}%"></i></div>
+ <p class="${f.overrun?'warn':''}">${f.points.length?(f.overrun?`At this pace you'll overspend by ${money(f.overrun_by)}.`:`On track: projected total ${money(f.projected_total)}.`):'Add expenses to see a spending forecast.'}</p></div>
+ <div class="charts"><div class="card"><canvas id="pie"></canvas></div><div class="card"><canvas id="line"></canvas></div></div>
+ <div class="card"><h2>Add expense</h2><div class="row"><select id="ec">${cats.map(c=>`<option>${c}</option>`).join('')}</select>
+ <input id="ea" type="number" min="1" placeholder="Amount"><input id="en" placeholder="Note"><input id="ed" type="date" value="${new Date().toISOString().slice(0,10)}"><button onclick="addExp()">Add expense</button></div>
+ <table>${ex.map(e=>`<tr><td>${e.spent_on}</td><td>${e.category}</td><td>${e.note||''}</td><td>${money(e.amount)}</td><td><button class="ghost" onclick="delExp(${e.id})" aria-label="Delete expense">✕</button></td></tr>`).join('')}</table></div>
+ <div class="card"><h2>AI plan</h2><button onclick="genPlan(this)">Generate with Gemini</button><div id="plan">${planHtml(plan)}</div></div>`;
+ pie=new Chart($('pie'),{type:'doughnut',data:{labels:Object.keys(s.by_category),datasets:[{data:Object.values(s.by_category),backgroundColor:['#0e7490','#f59e0b','#6366f1','#10b981','#ec4899','#94a3b8']}]},options:{plugins:{title:{display:true,text:'Spending by category'}}}});
+ const days=[...Array(t.days)].map((_,i)=>i+1),at=d=>(f.points.filter(p=>p.day<=d).pop()||{}).spent;
+ line=new Chart($('line'),{type:'line',data:{labels:days,datasets:[{label:'Spent',data:days.map(d=>d<=(f.points.at(-1)?.day||0)?at(d):null),borderColor:'#0e7490'},
+  {label:'Budget',data:days.map(()=>s.budget),borderColor:'#b91c1c',borderDash:[6,4],pointRadius:0}]},options:{plugins:{title:{display:true,text:'Cumulative spend vs budget (by day)'}}}})}
+function planHtml(p){if(!p)return '<p>No plan yet.</p>';const l=a=>'<ul>'+a.map(x=>`<li>${x}</li>`).join('')+'</ul>';
+ return p.itinerary.map(d=>`<h3>Day ${d.day}: ${d.title} (~${money(d.estimated_cost||0)})</h3>${l(d.activities)}`).join('')+`<h3>Packing list</h3>${l(p.packing_list)}<h3>Budget tips</h3>${l(p.budget_tips)}<h3>Recommendations</h3>${l(p.recommendations)}`}
+async function genPlan(b){b.disabled=true;b.textContent='Generating…';try{await post(`/trips/${cur}/plan`)}finally{render()}}
+async function addExp(){await post(`/trips/${cur}/expenses`,{category:$('ec').value,amount:+$('ea').value,note:$('en').value,spent_on:$('ed').value});render()}
+async function delExp(id){await api('/expenses/'+id,{method:'DELETE'});render()}
+loadTrips();
+</script></body></html>
